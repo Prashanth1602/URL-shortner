@@ -1,7 +1,11 @@
 """
-Dependency injection setup for the URL shortener application.
+Dependency injection and connection utilities for the URL shortener application.
+Includes:
+- Shard-aware SQLAlchemy session management (PostgreSQL)
+- Redis client (aioredis)
+- Kafka producer (aiokafka)
 """
-from typing import Generator, Optional
+from typing import Generator, Optional, List
 
 import aioredis
 from sqlalchemy import create_engine
@@ -9,21 +13,58 @@ from sqlalchemy.orm import sessionmaker, Session
 from aiokafka import AIOKafkaProducer
 
 from app.core.config import settings
+from app.services.hashing import shard_from_url, shard_from_short_code
 
-# Database setup
-SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# -----------------------------
+# Database: Shard-aware sessions
+# -----------------------------
+SHARD_ENGINES: List = []
+SHARD_SESSIONS: List[sessionmaker] = []
+
+def _init_shard_engines_once():
+    global SHARD_ENGINES, SHARD_SESSIONS
+    if SHARD_ENGINES:
+        return
+    for url in settings.SHARD_DB_URLS:
+        engine = create_engine(url, pool_pre_ping=True)
+        SHARD_ENGINES.append(engine)
+        SHARD_SESSIONS.append(sessionmaker(autocommit=False, autoflush=False, bind=engine))
+
+def get_session_for_shard(shard_index: int) -> Session:
+    """Get a SQLAlchemy session for a specific shard index."""
+    _init_shard_engines_once()
+    idx = shard_index % len(SHARD_SESSIONS)
+    return SHARD_SESSIONS[idx]()
 
 def get_db() -> Generator[Session, None, None]:
-    """Dependency that provides a database session."""
-    db = SessionLocal()
+    """Default DB session (shard 0). Maintained for compatibility."""
+    db = get_session_for_shard(0)
     try:
         yield db
     finally:
         db.close()
 
-# Redis setup
+def get_db_by_url(url: str) -> Generator[Session, None, None]:
+    """Provide a DB session for the shard derived from the URL."""
+    shard_index = shard_from_url(url, settings.NUM_SHARDS)
+    db = get_session_for_shard(shard_index)
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_db_by_short_code(short_code: str) -> Generator[Session, None, None]:
+    """Provide a DB session for the shard derived from the short code."""
+    shard_index = shard_from_short_code(short_code, settings.NUM_SHARDS)
+    db = get_session_for_shard(shard_index)
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ---------
+# Redis
+# ---------
 _redis_pool: Optional[aioredis.Redis] = None
 
 async def get_redis_client() -> aioredis.Redis:
@@ -33,7 +74,9 @@ async def get_redis_client() -> aioredis.Redis:
         _redis_pool = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     return _redis_pool
 
-# Kafka Producer setup (singleton)
+# ---------
+# Kafka
+# ---------
 _kafka_producer: Optional[AIOKafkaProducer] = None
 
 async def get_kafka_producer() -> AIOKafkaProducer:

@@ -1,5 +1,6 @@
 import hashlib
 from typing import tuple
+from app.core.config import settings
 
 BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 BASE = len(BASE62_ALPHABET) # 62
@@ -38,7 +39,14 @@ def base62_encode(decimal_id: int) -> str:
 
     return encoded
 
-def generate_short_code_and_shard_key(url: str, num_shards: int = 100) -> tuple[str, int]:
+def base62_decode(encoded: str) -> int:
+    """Converts a Base62 string back into a decimal integer."""
+    value = 0
+    for char in encoded:
+        value = value * BASE + BASE62_ALPHABET.index(char)
+    return value
+
+def generate_short_code_and_shard_key(url: str, num_shards: int = None) -> tuple[str, int]:
     """
     Generates the short code and calculates the shard index for storage.
     """
@@ -47,7 +55,8 @@ def generate_short_code_and_shard_key(url: str, num_shards: int = 100) -> tuple[
     raw_id = generate_raw_hash(url)
 
     # 2. Calculate the Shard Index (Scaling Logic)
-    shard_index = raw_id % num_shards
+    num = num_shards or settings.NUM_SHARDS
+    shard_index = raw_id % num
 
     # 3. Generate the Short Code (Encoding Logic)
     short_code = base62_encode(raw_id)
@@ -56,3 +65,14 @@ def generate_short_code_and_shard_key(url: str, num_shards: int = 100) -> tuple[
 
     # 4. Return (short_code, shard_index)
     return short_code, shard_index
+
+def shard_from_short_code(short_code: str, num_shards: int = None) -> int:
+    """Derive shard index from short_code by decoding to raw_id and modulo shard count."""
+    raw_id = base62_decode(short_code)
+    num = num_shards or settings.NUM_SHARDS
+    return raw_id % num
+
+def shard_from_url(url: str, num_shards: int = None) -> int:
+    raw_id = generate_raw_hash(url)
+    num = num_shards or settings.NUM_SHARDS
+    return raw_id % num

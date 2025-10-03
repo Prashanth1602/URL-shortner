@@ -9,11 +9,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import aioredis
 
-from app.core.dependencies import get_redis_client, get_db, get_kafka_producer
+from app.core.dependencies import get_redis_client, get_kafka_producer, get_session_for_shard
 from app.core.config import settings
 from app.services.db_ops import get_url_by_short_code
 from app.services.analytics import track_click_async
 from app.core.request_id import generate_request_id
+from app.services.hashing import shard_from_short_code
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,6 @@ router = APIRouter()
 async def redirect_to_url(
     request: Request,
     short_code: str,
-    db: Session = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis_client),
     kafka_producer = Depends(get_kafka_producer),
 ):
@@ -79,6 +79,9 @@ async def redirect_to_url(
     # 3. IF CACHE MISS: Try the database
     logger.info(f"Cache miss for {short_code}, checking database, request_id={request_id}")
     
+    # Determine shard and open session
+    shard_index = shard_from_short_code(short_code)
+    db: Session = get_session_for_shard(shard_index)
     try:
         # Get the URL from the database
         long_url, request_count = await get_url_by_short_code(db, short_code)
@@ -121,3 +124,5 @@ async def redirect_to_url(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request"
         )
+    finally:
+        db.close()

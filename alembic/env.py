@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app.core.config import settings
 from models.url_model import Base  # contains UrlMapping
+import os
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -25,8 +26,9 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
 
-# Override sqlalchemy.url from settings
-config.set_main_option('sqlalchemy.url', settings.DATABASE_URL)
+# Override sqlalchemy.url from env var if provided (used by multi-shard migrations)
+db_url = os.environ.get('DATABASE_URL', settings.DATABASE_URL)
+config.set_main_option('sqlalchemy.url', db_url)
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode."""

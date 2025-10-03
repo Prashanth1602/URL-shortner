@@ -1,16 +1,20 @@
 """
 Application configuration settings.
 """
-from pydantic import BaseSettings, HttpUrl, AnyUrl
-from typing import Optional
+from pydantic import BaseSettings
+from typing import Optional, List
 
 class Settings(BaseSettings):
     # Application settings
     APP_NAME: str = "URL Shortener"
     DEBUG: bool = False
     
-    # Database settings
-    DATABASE_URL: str = "sqlite:///./test.db"
+    # Database settings (PostgreSQL shards)
+    # Comma-separated list of shard URLs
+    SHARD_DB_URLS: List[str] = []
+    NUM_SHARDS: int = 1
+    # Compatibility: default DATABASE_URL (first shard)
+    DATABASE_URL: Optional[str] = None
     
     # Redis settings
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -28,8 +32,11 @@ class Settings(BaseSettings):
     # CORS settings
     CORS_ORIGINS: list[str] = ["*"]
     
-    # Number of shards for URL storage
-    NUM_SHARDS: int = 100
+    # Number of shards for URL storage (used in hashing)
+    # Defaults to length of SHARD_DB_URLS if provided
+    # Overridden by env NUM_SHARDS if set explicitly
+    # Note: keep consistent across services
+    # value set in __post_init__-like logic below
     
     class Config:
         env_file = ".env"
@@ -37,3 +44,19 @@ class Settings(BaseSettings):
 
 # Create settings instance
 settings = Settings()
+
+# Normalize shard settings after load
+if settings.SHARD_DB_URLS:
+    # Ensure list type when loaded from env (comma-separated)
+    if isinstance(settings.SHARD_DB_URLS, str):
+        settings.SHARD_DB_URLS = [s.strip() for s in settings.SHARD_DB_URLS.split(",") if s.strip()]
+    if not settings.DATABASE_URL:
+        settings.DATABASE_URL = settings.SHARD_DB_URLS[0]
+    # If NUM_SHARDS not explicitly set (>0), derive from list length
+    if not settings.NUM_SHARDS or settings.NUM_SHARDS < 1:
+        settings.NUM_SHARDS = len(settings.SHARD_DB_URLS)
+else:
+    # Fallback to single local SQLite if shards not configured (dev mode)
+    settings.DATABASE_URL = settings.DATABASE_URL or "sqlite:///./test.db"
+    settings.SHARD_DB_URLS = [settings.DATABASE_URL]
+    settings.NUM_SHARDS = 1

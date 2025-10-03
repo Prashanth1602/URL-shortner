@@ -12,17 +12,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.dependencies import get_redis_client
+from app.core.dependencies import get_redis_client, get_session_for_shard
+from app.services.hashing import shard_from_short_code
 from models.url_model import UrlMapping
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-# Set up synchronous DB session for worker simplicity (worker runs in its own process)
-engine = create_engine(settings.DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 async def process_message(db: Session, redis, message: bytes):
     try:
@@ -69,8 +64,17 @@ async def consume():
     try:
         logger.info("Kafka consumer started on topic: %s", settings.KAFKA_TOPIC_CLICK_EVENTS)
         async for msg in consumer:
-            # Create a short-lived DB session per message
-            db = SessionLocal()
+            # Determine shard per short_code and open session
+            try:
+                payload = json.loads(msg.value.decode("utf-8"))
+                sc = payload.get("short_code")
+            except Exception:
+                sc = None
+            if not sc:
+                logger.warning("Message missing short_code; skipping")
+                continue
+            shard_index = shard_from_short_code(sc)
+            db = get_session_for_shard(shard_index)
             try:
                 await process_message(db, redis, msg.value)
             finally:

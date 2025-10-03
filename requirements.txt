@@ -8,6 +8,7 @@ python-multipart>=0.0.5
 sqlalchemy>=1.4.23
 alembic>=1.7.3
 aiosqlite>=0.17.0  # For SQLite, replace with your database driver if using PostgreSQL/MySQL
+psycopg2-binary>=2.9.9  # PostgreSQL driver
 
 # Caching
 aioredis>=2.0.0
