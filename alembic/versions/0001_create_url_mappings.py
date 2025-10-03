@@ -17,10 +17,12 @@ depends_on = None
 def upgrade():
     op.create_table(
         'url_mappings',
-        sa.Column('short_code', sa.String(length=10), primary_key=True, index=True),
+        sa.Column('short_code', sa.String(length=10), primary_key=True),
         sa.Column('original_link', sa.String(length=2048), nullable=False),
         sa.Column('request_count', sa.Integer(), nullable=False, server_default='0')
     )
+    # Optional: explicit index (PK already indexed). Uncomment if needed.
+    # op.create_index('ix_url_mappings_short_code', 'url_mappings', ['short_code'], unique=True)
 
 
 def downgrade():

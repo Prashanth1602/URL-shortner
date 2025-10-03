@@ -1,5 +1,4 @@
 import hashlib
-from typing import tuple
 from app.core.config import settings
 
 BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
