@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     
     # Kafka settings
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_ENABLED: bool = False
     KAFKA_TOPIC_CLICK_EVENTS: str = "click_events"
     KAFKA_CONSUMER_GROUP: str = "analytics_consumer_group"
     

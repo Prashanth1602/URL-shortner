@@ -83,6 +83,9 @@ _kafka_producer: Optional[AIOKafkaProducer] = None
 async def get_kafka_producer() -> Optional[AIOKafkaProducer]:
     """Provide a shared AIOKafkaProducer instance; returns None if Kafka is unavailable."""
     global _kafka_producer
+    # Return None immediately if Kafka is disabled
+    if not settings.KAFKA_ENABLED:
+        return None
     if _kafka_producer is None:
         try:
             producer = AIOKafkaProducer(bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS)
