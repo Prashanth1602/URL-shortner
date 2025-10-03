@@ -10,7 +10,7 @@ from typing import Optional
 from redis import asyncio as aioredis
 
 from app.core.dependencies import get_redis_client, get_kafka_producer, get_session_for_shard
-from app.core.config import settings
+from app.core.config import settings, SHARD_DB_URL_LIST
 from app.services.db_ops import get_url_by_short_code
 from app.services.analytics import track_click_async
 from app.core.request_id import generate_request_id
@@ -59,15 +59,16 @@ async def redirect_to_url(
         # 2. IF CACHE HIT: Track the click and redirect
         logger.info(f"Cache hit for {short_code}, request_id={request_id}")
         
-        # Track the click asynchronously (fire-and-forget)
-        asyncio.create_task(
-            track_click_async(
-                producer=kafka_producer,
-                short_code=short_code,
-                request_headers=dict(request.headers),
-                request_id=request_id,
+        # Track the click asynchronously (fire-and-forget) if Kafka is available
+        if kafka_producer is not None:
+            asyncio.create_task(
+                track_click_async(
+                    producer=kafka_producer,
+                    short_code=short_code,
+                    request_headers=dict(request.headers),
+                    request_id=request_id,
+                )
             )
-        )
         
         # Return the redirect
         return RedirectResponse(
@@ -79,50 +80,50 @@ async def redirect_to_url(
     # 3. IF CACHE MISS: Try the database
     logger.info(f"Cache miss for {short_code}, checking database, request_id={request_id}")
     
-    # Determine shard and open session
-    shard_index = shard_from_short_code(short_code)
-    db: Session = get_session_for_shard(shard_index)
-    try:
-        # Get the URL from the database
-        long_url, request_count = await get_url_by_short_code(db, short_code)
-        
-        # Update cache for future requests (with a TTL)
-        await redis_client.set(
-            cache_key,
-            long_url,
-            ex=settings.REDIS_CACHE_TTL
-        )
-        
-        # Track the click asynchronously (fire-and-forget)
-        asyncio.create_task(
-            track_click_async(
-                producer=kafka_producer,
-                short_code=short_code,
-                request_headers=dict(request.headers),
-                request_id=request_id,
+    # Determine primary shard and attempt lookup; if not found, fall back to other shards
+    primary_shard = shard_from_short_code(short_code)
+    shard_order = list(range(len(SHARD_DB_URL_LIST)))
+    # Rotate so primary shard is first
+    shard_order = shard_order[primary_shard:] + shard_order[:primary_shard]
+
+    last_exception: Optional[Exception] = None
+    for idx in shard_order:
+        db: Session = get_session_for_shard(idx)
+        try:
+            long_url, request_count = await get_url_by_short_code(db, short_code)
+            # Cache and analytics
+            await redis_client.set(cache_key, long_url, ex=settings.REDIS_CACHE_TTL)
+            if kafka_producer is not None:
+                asyncio.create_task(
+                    track_click_async(
+                        producer=kafka_producer,
+                        short_code=short_code,
+                        request_headers=dict(request.headers),
+                        request_id=request_id,
+                    )
+                )
+            return RedirectResponse(
+                url=long_url,
+                status_code=status.HTTP_302_FOUND,
+                headers={"X-Request-ID": request_id}
             )
-        )
-        
-        # Return the redirect
-        return RedirectResponse(
-            url=long_url,
-            status_code=status.HTTP_302_FOUND,
-            headers={"X-Request-ID": request_id}
-        )
-        
-    except HTTPException as e:
-        # Re-raise 404 errors
-        if e.status_code == status.HTTP_404_NOT_FOUND:
-            logger.warning(f"URL not found: {short_code}, request_id={request_id}")
-            raise
-        # Re-raise other HTTP exceptions
-        raise
-    except Exception as e:
-        # Log other errors and return a 500
-        logger.error(f"Error redirecting {short_code}: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while processing your request"
-        )
-    finally:
-        db.close()
+        except HTTPException as e:
+            # Only continue fallback on 404; re-raise others
+            if e.status_code != status.HTTP_404_NOT_FOUND:
+                last_exception = e
+                break
+            # else try next shard
+        except Exception as e:
+            last_exception = e
+            break
+        finally:
+            db.close()
+
+    # If we encountered a non-404 exception, surface it as 500
+    if last_exception and not isinstance(last_exception, HTTPException):
+        logger.error(f"Error redirecting {short_code}: {str(last_exception)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while processing your request")
+
+    # After checking all shards, return 404
+    logger.warning(f"Short URL not found across shards: {short_code}, request_id={request_id}")
+    raise HTTPException(status_code=404, detail=f"Short URL not found: {short_code}")
