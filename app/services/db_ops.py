@@ -24,7 +24,7 @@ async def get_url_by_short_code(db: Session, short_code: str) -> Tuple[str, int]
     Raises:
         HTTPException: 404 if the short code is not found
     """
-    # Find the URL mapping
+    # Find the URL mapping without mutating state (reads should be pure)
     stmt = select(UrlMapping).where(UrlMapping.short_code == short_code)
     url_mapping = db.scalar(stmt)
     
@@ -34,11 +34,8 @@ async def get_url_by_short_code(db: Session, short_code: str) -> Tuple[str, int]
             detail=f"Short URL not found: {short_code}"
         )
     
-    # Increment the request count
-    url_mapping.request_count += 1
-    db.commit()
-    
-    return str(url_mapping.original_link), url_mapping.request_count
+    # Do not increment here; the analytics worker will update counts idempotently
+    return str(url_mapping.original_link), int(url_mapping.request_count)
 
 async def create_or_get_short_code(
     db: Session, 

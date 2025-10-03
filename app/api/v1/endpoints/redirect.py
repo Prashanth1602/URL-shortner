@@ -9,10 +9,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import aioredis
 
-from app.core.dependencies import get_redis_client, get_db
+from app.core.dependencies import get_redis_client, get_db, get_kafka_producer
+from app.core.config import settings
 from app.services.db_ops import get_url_by_short_code
-from app.services.analytics import track_click
+from app.services.analytics import track_click_async
 from app.core.request_id import generate_request_id
+import asyncio
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,7 +24,8 @@ async def redirect_to_url(
     request: Request,
     short_code: str,
     db: Session = Depends(get_db),
-    redis_client: aioredis.Redis = Depends(get_redis_client)
+    redis_client: aioredis.Redis = Depends(get_redis_client),
+    kafka_producer = Depends(get_kafka_producer),
 ):
     """
     Redirects a short URL to the original URL.
@@ -56,11 +59,14 @@ async def redirect_to_url(
         # 2. IF CACHE HIT: Track the click and redirect
         logger.info(f"Cache hit for {short_code}, request_id={request_id}")
         
-        # Track the click asynchronously
-        track_click(
-            short_code=short_code,
-            request_headers=dict(request.headers),
-            request_id=request_id
+        # Track the click asynchronously (fire-and-forget)
+        asyncio.create_task(
+            track_click_async(
+                producer=kafka_producer,
+                short_code=short_code,
+                request_headers=dict(request.headers),
+                request_id=request_id,
+            )
         )
         
         # Return the redirect
@@ -79,16 +85,19 @@ async def redirect_to_url(
         
         # Update cache for future requests (with a TTL)
         await redis_client.set(
-            cache_key, 
+            cache_key,
             long_url,
-            ex=60 * 60 * 24  # 24-hour TTL
+            ex=settings.REDIS_CACHE_TTL
         )
         
-        # Track the click asynchronously
-        track_click(
-            short_code=short_code,
-            request_headers=dict(request.headers),
-            request_id=request_id
+        # Track the click asynchronously (fire-and-forget)
+        asyncio.create_task(
+            track_click_async(
+                producer=kafka_producer,
+                short_code=short_code,
+                request_headers=dict(request.headers),
+                request_id=request_id,
+            )
         )
         
         # Return the redirect

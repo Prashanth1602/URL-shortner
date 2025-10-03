@@ -16,8 +16,10 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_CACHE_TTL: int = 60 * 60 * 24 * 7  # 1 week in seconds
     
-    # RabbitMQ settings
-    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
+    # Kafka settings
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_TOPIC_CLICK_EVENTS: str = "click_events"
+    KAFKA_CONSUMER_GROUP: str = "analytics_consumer_group"
     
     # Security
     SECRET_KEY: str = "your-secret-key-here"  # Change this in production

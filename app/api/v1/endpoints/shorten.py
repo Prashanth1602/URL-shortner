@@ -4,6 +4,7 @@ from fastapi import APIRouter, status, Depends
 from sqlalchemy.orm import Session
 from app.schemas.url import ShortenRequest, ShortenResponse
 from app.services.db_ops import create_or_get_short_code
+from app.core.dependencies import get_db
 
 # Assume get_db is defined in your dependencies file
 # NOTE: Using a placeholder router for simplicity

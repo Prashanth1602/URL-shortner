@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse
 
 from app.core.config import settings
 from app.api.v1.endpoints import redirect, shorten
+from app.core.dependencies import close_kafka_producer
 
 # Configure logging
 logging.basicConfig(
@@ -87,7 +88,11 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources when the application shuts down."""
     logger.info("Shutting down URL shortener service...")
-    # Clean up resources here
+    # Close Kafka producer if initialized
+    try:
+        await close_kafka_producer()
+    except Exception as e:
+        logger.warning(f"Error closing Kafka producer: {e}")
 
 # Health check endpoint
 @app.get("/health", status_code=status.HTTP_200_OK)

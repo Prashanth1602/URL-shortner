@@ -1,35 +1,28 @@
 """
-Analytics service for tracking URL redirects.
+Analytics service for tracking URL redirects via Kafka.
 """
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from datetime import datetime
-import pika
+
+from aiokafka import AIOKafkaProducer
 
 from app.core.config import settings
 from app.core.request_id import generate_request_id
 
-def track_click(
+async def track_click_async(
+    producer: AIOKafkaProducer,
     short_code: str,
     request_headers: Optional[Dict[str, str]] = None,
-    request_id: Optional[str] = None
+    request_id: Optional[str] = None,
 ) -> str:
     """
-    Track a click on a short URL.
-    
-    Args:
-        short_code: The short code that was clicked
-        request_headers: HTTP headers from the request (for analytics)
-        request_id: Optional request ID for idempotency
-        
-    Returns:
-        The request ID used for tracking
+    Track a click on a short URL by publishing to Kafka asynchronously.
     """
     if request_id is None:
         request_id = generate_request_id()
-    
-    # Prepare click event data
-    click_event = {
+
+    event = {
         "event_type": "click",
         "timestamp": datetime.utcnow().isoformat(),
         "request_id": request_id,
@@ -38,43 +31,15 @@ def track_click(
         "ip_address": request_headers.get("x-forwarded-for") if request_headers else None,
         "referrer": request_headers.get("referer") if request_headers else None,
     }
-    
-    # Publish to message queue
+
     try:
-        # Using BlockingConnection in a separate thread to avoid blocking
-        import threading
-        
-        def publish_event():
-            try:
-                connection = pika.BlockingConnection(
-                    pika.URLParameters(settings.RABBITMQ_URL)
-                )
-                channel = connection.channel()
-                channel.exchange_declare(exchange='analytics', exchange_type='direct')
-                channel.queue_declare(queue='click_events', durable=True)
-                channel.queue_bind(exchange='analytics', queue='click_events', routing_key='click')
-                
-                channel.basic_publish(
-                    exchange='analytics',
-                    routing_key='click',
-                    body=json.dumps(click_event),
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,  # Make message persistent
-                        message_id=request_id,
-                    )
-                )
-                connection.close()
-            except Exception as e:
-                # Log the error but don't fail the request
-                print(f"Failed to publish analytics event: {e}")
-        
-        # Start a new thread to publish the event
-        thread = threading.Thread(target=publish_event)
-        thread.daemon = True
-        thread.start()
-        
+        await producer.send_and_wait(
+            topic=settings.KAFKA_TOPIC_CLICK_EVENTS,
+            value=json.dumps(event).encode("utf-8"),
+            key=short_code.encode("utf-8"),
+        )
     except Exception as e:
-        # Log the error but don't fail the request
-        print(f"Error in analytics tracking: {e}")
-    
+        # Log but do not fail the request
+        print(f"Kafka publish failed: {e}")
+
     return request_id
