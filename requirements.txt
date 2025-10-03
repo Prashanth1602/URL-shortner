@@ -1,3 +1,35 @@
-fastapi
-uvicorn
-pydantic
+# Core Dependencies
+fastapi>=0.68.0
+uvicorn>=0.15.0
+pydantic>=1.8.0
+python-multipart>=0.0.5
+
+# Database
+sqlalchemy>=1.4.23
+alembic>=1.7.3
+aiosqlite>=0.17.0  # For SQLite, replace with your database driver if using PostgreSQL/MySQL
+
+# Caching
+aioredis>=2.0.0
+redis>=4.0.0
+
+# Message Queue
+pika>=1.2.0
+
+# Environment Management
+python-dotenv>=0.19.0
+
+# Testing
+pytest>=6.2.5
+pytest-asyncio>=0.15.1
+httpx>=0.19.0
+
+# Code Quality
+black>=21.9b0
+isort>=5.9.3
+mypy>=0.910
+flake8>=3.9.2
+
+# Documentation
+mkdocs>=1.2.3
+mkdocs-material>=7.3.6

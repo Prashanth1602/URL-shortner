@@ -1,26 +1,96 @@
-from fastapi import FastAPI, HTTPException, status, Depends
-from starlette.responses import RedirectResponse
-# Assume get_redis_client() is defined in app/core/dependencies.py
+"""
+Main application module for the URL shortener service.
+"""
+import logging
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import JSONResponse
 
-app = FastAPI()
+from app.core.config import settings
+from app.api.v1.endpoints import redirect, shorten
 
-@app.get("/{short_code}")
-async def redirect_to_url(
-    short_code: str,
-    redis_client: object = Depends(get_redis_client) 
-):
-    # 1. CHECK CACHE:
-    long_url = await redis_client.get(short_code)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-    if long_url:
-        # 2. IF CACHE HIT: Log to Queue, Issue 302 Redirect
-        
-        # Placeholder for actual URL and queue logic:
-        # return RedirectResponse(long_url, status_code=status.HTTP_302_FOUND)
-        return RedirectResponse("https://placeholder.com/long_url", status_code=status.HTTP_302_FOUND)
-        
-    # 3. IF CACHE MISS: Fall through to Sharded DB Lookup...
-    
-    # 4. IF NOT FOUND ANYWHERE:
-    # We will raise 404 after the DB lookup fails.
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+# Create FastAPI app
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="A high-performance URL shortener service with analytics",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include API routers
+app.include_router(
+    redirect.router,
+    prefix="",  # Mount at root
+    tags=["redirect"],
+)
+
+app.include_router(
+    shorten.router,
+    prefix="/api/v1",
+    tags=["shorten"],
+)
+
+# Exception handlers
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with JSON responses."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors with detailed error messages."""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions with a generic error message."""
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
+    )
+
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services when the application starts."""
+    logger.info("Starting URL shortener service...")
+    # Initialize any required services here
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources when the application shuts down."""
+    logger.info("Shutting down URL shortener service...")
+    # Clean up resources here
+
+# Health check endpoint
+@app.get("/health", status_code=status.HTTP_200_OK)
+async def health_check():
+    """Health check endpoint for monitoring."""
+    return {"status": "healthy"}
