@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
-import aioredis
+from redis import asyncio as aioredis
 
 from app.core.dependencies import get_redis_client, get_kafka_producer, get_session_for_shard
 from app.core.config import settings

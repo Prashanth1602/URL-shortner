@@ -1,7 +1,7 @@
 """
 Application configuration settings.
 """
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from typing import Optional, List
 
 class Settings(BaseSettings):
@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # Database settings (PostgreSQL shards)
-    # Comma-separated list of shard URLs
-    SHARD_DB_URLS: List[str] = []
+    # Comma-separated list of shard URLs (parsed post-load)
+    SHARD_DB_URLS: str = ""
     NUM_SHARDS: int = 1
     # Compatibility: default DATABASE_URL (first shard)
     DATABASE_URL: Optional[str] = None
@@ -46,17 +46,25 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Normalize shard settings after load
+parsed_shard_urls: List[str] = []
 if settings.SHARD_DB_URLS:
-    # Ensure list type when loaded from env (comma-separated)
-    if isinstance(settings.SHARD_DB_URLS, str):
-        settings.SHARD_DB_URLS = [s.strip() for s in settings.SHARD_DB_URLS.split(",") if s.strip()]
+    parsed_shard_urls = [s.strip() for s in settings.SHARD_DB_URLS.split(",") if s.strip()]
+if parsed_shard_urls:
     if not settings.DATABASE_URL:
-        settings.DATABASE_URL = settings.SHARD_DB_URLS[0]
-    # If NUM_SHARDS not explicitly set (>0), derive from list length
+        settings.DATABASE_URL = parsed_shard_urls[0]
     if not settings.NUM_SHARDS or settings.NUM_SHARDS < 1:
-        settings.NUM_SHARDS = len(settings.SHARD_DB_URLS)
+        settings.NUM_SHARDS = len(parsed_shard_urls)
+    # Attach back as list for general availability
+    settings.SHARD_DB_URLS = ",".join(parsed_shard_urls)
+    SHARD_DB_URL_LIST = parsed_shard_urls
 else:
     # Fallback to single local SQLite if shards not configured (dev mode)
     settings.DATABASE_URL = settings.DATABASE_URL or "sqlite:///./test.db"
-    settings.SHARD_DB_URLS = [settings.DATABASE_URL]
+    parsed_shard_urls = [settings.DATABASE_URL]
     settings.NUM_SHARDS = 1
+
+# Export a helper list for dependencies module
+try:
+    SHARD_DB_URL_LIST
+except NameError:
+    SHARD_DB_URL_LIST = parsed_shard_urls

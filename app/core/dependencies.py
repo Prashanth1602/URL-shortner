@@ -7,12 +7,13 @@ Includes:
 """
 from typing import Generator, Optional, List
 
-import aioredis
+from redis import asyncio as aioredis
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from aiokafka import AIOKafkaProducer
+import logging
 
-from app.core.config import settings
+from app.core.config import settings, SHARD_DB_URL_LIST
 from app.services.hashing import shard_from_url, shard_from_short_code
 
 # -----------------------------
@@ -25,7 +26,7 @@ def _init_shard_engines_once():
     global SHARD_ENGINES, SHARD_SESSIONS
     if SHARD_ENGINES:
         return
-    for url in settings.SHARD_DB_URLS:
+    for url in SHARD_DB_URL_LIST:
         engine = create_engine(url, pool_pre_ping=True)
         SHARD_ENGINES.append(engine)
         SHARD_SESSIONS.append(sessionmaker(autocommit=False, autoflush=False, bind=engine))
@@ -79,13 +80,17 @@ async def get_redis_client() -> aioredis.Redis:
 # ---------
 _kafka_producer: Optional[AIOKafkaProducer] = None
 
-async def get_kafka_producer() -> AIOKafkaProducer:
-    """Provide a shared AIOKafkaProducer instance (started on first use)."""
+async def get_kafka_producer() -> Optional[AIOKafkaProducer]:
+    """Provide a shared AIOKafkaProducer instance; returns None if Kafka is unavailable."""
     global _kafka_producer
     if _kafka_producer is None:
-        producer = AIOKafkaProducer(bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS)
-        await producer.start()
-        _kafka_producer = producer
+        try:
+            producer = AIOKafkaProducer(bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS)
+            await producer.start()
+            _kafka_producer = producer
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Kafka unavailable: {e}")
+            _kafka_producer = None
     return _kafka_producer
 
 async def close_kafka_producer():

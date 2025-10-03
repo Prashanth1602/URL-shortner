@@ -15,17 +15,18 @@ from typing import List
 # Ensure project root in path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 os.chdir(PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from app.core.config import settings  # noqa: E402
-
-ALembicCmd = ["alembic"]
+from app.core.config import settings, SHARD_DB_URL_LIST  # noqa: E402
 
 def run_for_shard(db_url: str, alembic_args: List[str]) -> int:
     env = os.environ.copy()
     # Provide DATABASE_URL so alembic/env.py will use it
     env["DATABASE_URL"] = db_url
     print(f"\n=== Running Alembic for shard: {db_url} ===")
-    return subprocess.call(ALembicCmd + alembic_args, env=env)
+    # Use the current Python interpreter to run Alembic module to avoid PATH issues
+    return subprocess.call([sys.executable, "-m", "alembic", *alembic_args], env=env)
 
 
 def main():
@@ -36,7 +37,7 @@ def main():
 
     alembic_args = sys.argv[1:]
 
-    shard_urls = settings.SHARD_DB_URLS or []
+    shard_urls = SHARD_DB_URL_LIST or []
     if not shard_urls:
         print("No SHARD_DB_URLS configured. Exiting.")
         sys.exit(1)
